@@ -1,12 +1,10 @@
 import os
 import glob
-import tables
 
-from unet3d.data_adaptive import write_data_to_file, open_data_file
-from unet3d.generator import get_training_and_validation_generators
-from unet3d.model.isensee2017_3GPU import isensee2017_model_3GPU
-from unet3d.model.isensee2017_2GPU_EWC import isensee2017_model_2GPU
-from unet3d.training import load_old_model, train_model
+from Unet3D.unet3d.data_adaptive import write_data_to_file, open_data_file
+from Unet3D.unet3d.generator import get_training_and_validation_generators
+from Unet3D.unet3d.model.isensee2017_GPU_EWC import isensee2017_model
+from Unet3D.unet3d.training import load_old_model, train_model
 
 import tensorflow as tf
 from keras.backend import tensorflow_backend
@@ -94,15 +92,11 @@ def main(overwrite=False):
 
     if config["GPU_mode"] == 'auto_2':
 
-        FM = tables.open_file(os.path.dirname(config['transfer_model_file'])+'/FM.h5').root
-        M_old = tables.open_file(config['transfer_model_file']).root
-
         model = isensee2017_model_2GPU(input_shape=config["input_shape"],
                                   n_labels=config["n_labels"],
                                   initial_learning_rate=config["initial_learning_rate"],
                                   n_base_filters=config["n_base_filters"],
-                                  non_trainable_list=config['non_trainable_list'],
-                                  FM = FM, fisher_multiplier = config['fisher_multiplier'], M_old = M_old)
+                                  non_trainable_list=config['non_trainable_list'])
 
     if config["GPU_mode"] == 'auto_3':
 
@@ -164,8 +158,7 @@ def main(overwrite=False):
                 learning_rate_patience=config["patience"],
                 early_stopping_patience=config["early_stop"],
                 n_epochs=config["n_epochs"],
-                logging_file=config["logging_file"],
-                tensorboard_logdir = config["Base_directory"]+'/logdir')
+                logging_file=config["logging_file"])
     data_file_opened.close()
 
 if __name__ == "__main__":

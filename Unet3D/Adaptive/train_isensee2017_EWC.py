@@ -1,18 +1,16 @@
 import os
 import glob
+import tables
 
-from unet3d.data_adaptive import write_data_to_file, open_data_file
-from unet3d.generator import get_training_and_validation_generators
-from unet3d.model.isensee2017_3GPU import isensee2017_model_3GPU
-from unet3d.model.isensee2017_2GPU import isensee2017_model_2GPU
-from unet3d.training import load_old_model, train_model
+from Unet3D.unet3d.data_adaptive import write_data_to_file, open_data_file
+from Unet3D.unet3d.generator import get_training_and_validation_generators
+from Unet3D.unet3d.model.isensee2017_GPU_EWC import isensee2017_model
+from Unet3D.unet3d.training import load_old_model, train_model
 
 import tensorflow as tf
 from keras.backend import tensorflow_backend
 
 config = dict()
-
-####### data independent cofigurations:
 
 config["n_base_filters"] = 16
 config["deconvolution"] = True  # if False, will use upsampling instead of deconvolution
@@ -34,28 +32,39 @@ def fetch_training_data_files(return_subject_ids=False):
     training_data_files = list()
     subject_ids = list()
 
-    if config['data'] == 'brats':
-        Directories = glob.glob(os.path.join("./brats", "data", "preprocessed", "*", "*"))
-        truth = "truth"
-        ending = ".nii.gz"
-    elif config['data'] == 'mrbrains':
-        Directories = glob.glob(os.path.join("./mrbrains", "MRBrainS13DataNii", "preprocessed", "*", "*"))
-        truth = "LabelsForTraining"
-        ending = ".nii.gz"
-    elif config['data'] == 'lupus':
-        Directories = glob.glob(os.path.join("./Lupus", "data", "original", "*", "*"))
-        truth = "LabelsForTraining"
-        ending = ".nii.gz"
-    elif config['data'] == 'Neerav':
-        Directories = glob.glob(os.path.join("./Neerav_data", "*"))
-        truth = "preprocessed_gt15"
-        ending = ".nii.gz"
-    elif config['data'] == 'Brats_2018':
-        Directories = glob.glob(os.path.join("./Brats2018", "MICCAI_BraTS_2018_Data_Training_preprocessed", "*", "*"))
-        truth = "truth"
-        ending = ".nii.gz"
+    if os.path.isdir(config['data_directory']):
+        if os.path.isfile(glob.glob(os.path.join(config['data_directory'], "*","*"))[0]):
+            Directories = glob.glob(os.path.join(config['data_directory'], "*"))
+            truth = "truth"
+            ending = ".nii.gz"
+        elif os.path.isfile(glob.glob(os.path.join(config['data_directory'], "*","*","*"))[0]):
+            Directories = glob.glob(os.path.join(config['data'], "*","*"))
+            truth = "truth"
+            ending = ".nii.gz"
+        else:
+            print(
+                'Please provide a file structure that obeys the following rules: \n Data_directory \n --> Patient_directory'
+                ' \n      --> Patient_file'
+                ' \n OR'
+                ' \n Data_directory'
+                ' \n --> Subdirectory'
+                ' \n     --> Patient_directory'
+                ' \n         --> Patient_file'
+                ' \nPatient File must be modality name provided in config + .nii.gz and truth.nii.gz for ground truth images.'
+                )
+            raise EnvironmentError
     else:
-        print('data must be Brats or MrBrains or Lupus')
+        print(
+            config['data_directory'] + " does not exist"
+            '\n Please provide a file structure that obeys the following rules: \n Data_directory \n --> Patient_directory'
+                ' \n      --> Patient_file'
+                ' \n OR'
+                ' \n Data_directory'
+                ' \n --> Subdirectory'
+                ' \n     --> Patient_directory'
+                ' \n         --> Patient_file'
+                ' \nPatient File must be modality name provided in config + .nii.gz and truth.nii.gz for ground truth images.'
+        )
         raise EnvironmentError
     for subject_dir in Directories:
         subject_ids.append(os.path.basename(subject_dir))
@@ -69,44 +78,59 @@ def fetch_training_data_files(return_subject_ids=False):
         return training_data_files
 
 
-def main(overwrite=False):
-    # convert input images into an hdf5 file
 
-    config["data_file"] = config["data_file"][:-3] + '_' + config["normalize"] + config["data_file"][-3:]
+def main(overwrite=False):
+    config["data_file"] = config["data_file"] + '_' + config["normalize"] + '.h5'
 
     if overwrite or not os.path.exists(config["data_file"]):
+        print('specified data_file does not exist yet at' + config["data_file"] + '. Trying to build a data_file from '
+              'patient data at '+config['data_directory'])
         training_files, subject_ids = fetch_training_data_files(return_subject_ids=True)
 
         write_data_to_file(training_files,
-                            config["data_file"],
-                            image_shape=config["image_shape"],
-                            subject_ids=subject_ids,
-                            normalize=config['normalize'])
+                           config["data_file"],
+                           image_shape=config["image_shape"],
+                           subject_ids=subject_ids,
+                           normalize=config['normalize'])
 
     data_file_opened = open_data_file(config["data_file"])
 
-    os.environ["CUDA_VISIBLE_DEVICES"] = config["GPU"]
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(config["GPU"])[1:-1]
 
     sess = tf.Session(config=tf.ConfigProto(gpu_options=tf.GPUOptions(allow_growth=True)))
 
     tensorflow_backend.set_session(sess)
 
-    if config["GPU_mode"] == 'auto_2':
+    if config["EWC"]:
+        try:
+            FM = tables.open_file(os.path.dirname(config['transfer_model_file']) + '/FM.h5').root
+        except:
+            'There appears to be no Fisher Information at: ' + os.path.dirname(
+                config['transfer_model_file']) + '/FM.h5' + ' It is therefor not possible to run EWC.'
+            raise AttributeError
 
-        model = isensee2017_model_2GPU(input_shape=config["input_shape"],
+        M_old = tables.open_file(config['transfer_model_file']).root
+
+        model = isensee2017_model(input_shape=config["input_shape"],
                                   n_labels=config["n_labels"],
                                   initial_learning_rate=config["initial_learning_rate"],
                                   n_base_filters=config["n_base_filters"],
-                                  non_trainable_list=config['non_trainable_list'])
+                                  non_trainable_list=config['non_trainable_list'],
+                                  gpu=len(config["GPU"]),
+                                  FM=FM,
+                                  fisher_multiplier=config['fisher_multiplier'],
+                                  M_old=M_old)
 
-    if config["GPU_mode"] == 'auto_3':
+    else:
 
-        model = isensee2017_model_3GPU(input_shape=config["input_shape"],
+        model = isensee2017_model(input_shape=config["input_shape"],
                                   n_labels=config["n_labels"],
                                   initial_learning_rate=config["initial_learning_rate"],
-                                  n_base_filters=config["n_base_filters"])
+                                  n_base_filters=config["n_base_filters"],
+                                  non_trainable_list=config['non_trainable_list'],
+                                  gpu=len(config["GPU"]))
 
-    if os.path.exists(config["transfer_model_file"]):
+    if config["transfer_model_file"]:
 
         transfer_model = load_old_model(config["transfer_model_file"])
 
@@ -158,35 +182,9 @@ def main(overwrite=False):
                 learning_rate_drop=config["learning_rate_drop"],
                 learning_rate_patience=config["patience"],
                 early_stopping_patience=config["early_stop"],
-                n_epochs=config["n_epochs"],
-                logging_file=config["logging_file"])
+                n_epochs=1,
+                logging_file=config["logging_file"],
+                tensorboard_logdir=os.path.join(os.path.dirname(config["model_file"]), 'logdir'))
     data_file_opened.close()
 
-if __name__ == "__main__":
-
-    # If this script is run directly, please specify the following:
-    config["GPU"] = '0,2,7'
-    config["logging_file"] = 'LOG.csv'
-    config["image_shape"] = (160,208,160)  # This determines what shape the images will be cropped/resampled to.
-    config["flip"] = False  # augments the data by randomly flipping an axis during
-    config["patch_shape"] = None  # switch to None to train on the whole image
-    config["data_file"] = os.path.abspath("MRBrainS_data_cube.h5")
-    config["all_modalities"] = ["t1", "t1Gd", "flair", "t2"]
-    config["labels"] = (1, 2, 4)
-    config["transfer_model_file"] = None
-    config["model_file"] = os.path.abspath("isensee_MRBRainS_2017_model_3_GPU_cube.h5")
-    config["training_file"] = os.path.abspath("isensee_MRBRainS_training_ids_span_norm_2_cube.pkl")
-    config["validation_file"] = os.path.abspath("isensee_MRBRainS_validation_ids_span_norm_2_cube.pkl")
-    config["overwrite"] = False  # If True, will previous files. If False, will use previously written files.
-    config["n_labels"] = len(config["labels"])
-    config["training_modalities"] = config[
-        "all_modalities"]  # change this if you want to only use some of the modalities
-    config["nb_channels"] = len(config["training_modalities"])
-
-    if "patch_shape" in config and config["patch_shape"] is not None:
-        config["input_shape"] = tuple([config["nb_channels"]] + list(config["patch_shape"]))
-    else:
-        config["input_shape"] = tuple([config["nb_channels"]] + list(config["image_shape"]))
-    config["truth_channel"] = config["nb_channels"]
-
-    main(overwrite=config["overwrite"])
+    return model
