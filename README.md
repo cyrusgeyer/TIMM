@@ -1,4 +1,4 @@
-# Segmentron
+# T-IMM
 Life-long learning approach to Medical image segmentation:
 ============
 
