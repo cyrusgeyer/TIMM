@@ -31,15 +31,15 @@ def get_free_gpus(num, except_gpu = 2):
     return str(free_gpu)[1:-1]
 
 
-def CalculateFisherMatrix(FM_file, sess, data, graph, weight, logits_name, output_name, num_classes=8, L_max=1, **extras):
+def CalculateFisherMatrix(FM_file, sess, data, graph, weight, logits_name, output_name, num_labels, L_max=1, **extras):
     inp = graph.get_tensor_by_name('input_1:0')
     output_before_sigmoid = graph.get_tensor_by_name(output_name)
     shape = list(output_before_sigmoid.shape)
     shape[0] = -1
 
-    yl = tf.reshape(output_before_sigmoid, [-1, num_classes])
+    yl = tf.reshape(output_before_sigmoid, [-1, num_labels])
 
-    sampled_labels = tf.reshape(tf.one_hot(tf.multinomial(yl, 1), num_classes), shape)
+    sampled_labels = tf.reshape(tf.one_hot(tf.multinomial(yl, 1), num_labels), shape)
     logits = tf.reshape(graph.get_tensor_by_name(logits_name), shape)
 
     probability = weighted_dice_coefficient(sampled_labels, logits)
@@ -58,41 +58,29 @@ def CalculateFisherMatrix(FM_file, sess, data, graph, weight, logits_name, outpu
         print('FM of ' + weight.name + ' sampled' + str(L) + ' times')
     return 0
 
-
-def main(FLAGS):
-    os.environ["CUDA_VISIBLE_DEVICES"] = get_free_gpus(FLAGS.GPU)
-
-    sess = tf.Session(config=tf.ConfigProto(gpu_options=tf.GPUOptions(allow_growth=True)))
-
+def main(FLAGS,model,sess):
     tensorflow_backend.set_session(sess)
 
-    data = tables.open_file(FLAGS.data)
-    FM_file = h5py.File(FLAGS.FM, "a")
-
-    file = open(FLAGS.ids, mode='r')
-    p = pickle.load(file)
-
-    print('The ids that the Fisher info is computed on:')
-    print(p)
-
+    data = tables.open_file(FLAGS.data_file)
+    FM = os.path.dirname(FLAGS.model_file) + '/FM.h5'
+    FM_file = h5py.File(FM, "a")
+    p = pickle.load(open(FLAGS.validation_file, mode='r'))
     vali_data = data.root['data'][:][p]
-
-    transfer_model = load_old_model(FLAGS.model)
 
     graph = sess.graph
 
-    for weight in transfer_model.weights:
-        CalculateFisherMatrix(FM_file, sess, vali_data, graph, weight, FLAGS.logits, FLAGS.output)
+    for weight in model.weights:
+        CalculateFisherMatrix(FM_file, sess, vali_data, graph, weight, FLAGS.logits, FLAGS.output_before_sigmoid,
+                              num_labels=len(FLAGS.labels))
 
     FM_file.close()
 
     sess.close()
 
-
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        '--GPU',
+        '--num_GPU',
         type=int,
         default=1,
         help='How many GPUs to use'
@@ -110,7 +98,7 @@ if __name__ == '__main__':
         help='Name of the tensor that feeds into the logits output (ouptut before sigmoid)'
     )
     parser.add_argument(
-        '--data',
+        '--data_file',
         type=str,
         default='/local/home/geyerr/3DUnetCNN/IMM_Experiments/Neerav/Neerav_data_hist_norm.h5',
         help='data_set that was used for training'
@@ -142,9 +130,7 @@ if __name__ == '__main__':
 
     FLAGS, unparsed = parser.parse_known_args()
 
-    if FLAGS.FM == "None":
-        FLAGS.FM = os.path.dirname(FLAGS.model) + '/FM.h5'
-
+    os.environ["CUDA_VISIBLE_DEVICES"] = get_free_gpus(FLAGS.num_GPU)
     print('The labels that the Fisher info is computed on:')
     print(FLAGS.labels)
 

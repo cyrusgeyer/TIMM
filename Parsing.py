@@ -1,6 +1,7 @@
 import tensorflow as tf
 
 from Unet3D.Adaptive import train_isensee2017_EWC as train_isensee2017
+from Unet3D.IMM.Calculate_Fisher_Information import main as Calculate_FM
 import gpustat
 import time
 import os
@@ -28,8 +29,13 @@ def get_free_gpus(num, except_gpu=None):
 def main():
     FLAGS.GPU = get_free_gpus(FLAGS.num_GPU)
     train_isensee2017.config.update(vars(FLAGS))
-    model = train_isensee2017.main(overwrite=False)
-    train_isensee2017.model
+    model,sess = train_isensee2017.main(overwrite=False)
+
+    if FLAGS.Calculate_FM:
+        model.load_weights(FLAGS.model_file)
+        FLAGS.output_before_sigmoid = model.outputs[0].op.inputs[0].name
+        FLAGS.logits = model.outputs[0].name
+        Calculate_FM(FLAGS,model,sess)
 
 
 if __name__ == '__main__':
@@ -178,6 +184,12 @@ if __name__ == '__main__':
         default=False,
         help='Whether to use EWC to regularize parameters.'
     )
+    parser.add_argument(
+        '--Calculate_FM',
+        type=bool,
+        default=True,
+        help='Whether to calculate the FM after completing training'
+    )
 
     FLAGS, unparsed = parser.parse_known_args()
 
@@ -185,7 +197,7 @@ if __name__ == '__main__':
         print('Please specify the argument data_file')
 
     FLAGS.Base_directory = os.path.join(os.getcwd(),'Data_and_Pretrained_Models',FLAGS.Base_directory)
-    FLAGS.data_file = os.path.join(FLAGS.Base_directory,FLAGS.data_file)
+    FLAGS.data_file = os.path.join(FLAGS.Base_directory, FLAGS.data_file + '_' + FLAGS.normalize + '.h5')
     FLAGS.nb_channels = len(FLAGS.training_modalities)
     FLAGS.patch_shape = None
     FLAGS.truth_channel = FLAGS.nb_channels

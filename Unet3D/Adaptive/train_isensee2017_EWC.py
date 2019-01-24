@@ -80,7 +80,6 @@ def fetch_training_data_files(return_subject_ids=False):
 
 
 def main(overwrite=False):
-    config["data_file"] = config["data_file"] + '_' + config["normalize"] + '.h5'
 
     if overwrite or not os.path.exists(config["data_file"]):
         print('specified data_file does not exist yet at' + config["data_file"] + '. Trying to build a data_file from '
@@ -187,4 +186,4 @@ def main(overwrite=False):
                 tensorboard_logdir=os.path.join(os.path.dirname(config["model_file"]), 'logdir'))
     data_file_opened.close()
 
-    return model
+    return model,sess
